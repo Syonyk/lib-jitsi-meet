@@ -52,7 +52,11 @@ const DESKSTOP_SHARE_RATE = 500000;
  * stream.
  * @param {boolean} options.disableH264 If set to 'true' H264 will be
  *      disabled by removing it from the SDP.
+ * @param {boolean} options.disableVP9 If set to 'true' VP9 will be
+ *      disabled by removing it from the SDP.
  * @param {boolean} options.preferH264 if set to 'true' H264 will be preferred
+ * over other video codecs.
+ * @param {boolean} options.preferVP9 if set to 'true' VP9 will be preferred
  * over other video codecs.
  * @param {boolean} options.enableLayerSuspension if set to 'true', we will
  * cap the video send bitrate when we are told we have not been selected by
@@ -1869,14 +1873,32 @@ TraceablePeerConnection.prototype.setLocalDescription = function(description) {
 
     this.trace('setLocalDescription::preTransform', dumpSDP(localSdp));
 
-    if (this.options.disableH264 || this.options.preferH264) {
+    /*
+     * Reorder/rewrite the SDP if needed to disable codecs or reorder them.
+     * If both VP9 and H264 are preferred, set VP9, H264, VP8.
+     * The prefer/strip functions convert codecs to lowercase before checking,
+     * so case doesn't matter.
+     */
+    if (this.options.disableH264 || this.options.preferH264
+        || this.options.disableVP9 || this.options.preferVP9) {
         const parsedSdp = transform.parse(localSdp.sdp);
+
         const videoMLine = parsedSdp.media.find(m => m.type === 'video');
 
+        // Strip codecs out - no point in warning if the user is using both
+        // disable and prefer, disable takes priority.
         if (this.options.disableH264) {
             SDPUtil.stripVideoCodec(videoMLine, 'h264');
-        } else {
+        }
+        if (this.options.disableVP9) {
+            SDPUtil.stripVideoCodec(videoMLine, 'vp9');
+        }
+
+        if (this.options.preferH264) {
             SDPUtil.preferVideoCodec(videoMLine, 'h264');
+        }
+        if (this.options.preferVP9) {
+            SDPUtil.preferVideoCodec(videoMLine, 'vp9');
         }
 
         localSdp = new RTCSessionDescription({
@@ -2020,11 +2042,17 @@ TraceablePeerConnection.prototype.setRemoteDescription = function(description) {
                 dumpSDP(description));
         }
 
-        if (this.options.preferH264) {
+        if (this.options.preferH264 || this.options.preferVP9) {
             const parsedSdp = transform.parse(description.sdp);
             const videoMLine = parsedSdp.media.find(m => m.type === 'video');
 
-            SDPUtil.preferVideoCodec(videoMLine, 'h264');
+            if (this.options.preferH264) {
+                SDPUtil.preferVideoCodec(videoMLine, 'h264');
+            }
+
+            if (this.options.preferVP9) {
+                SDPUtil.preferVideoCodec(videoMLine, 'vp9');
+            }
 
             // eslint-disable-next-line no-param-reassign
             description = new RTCSessionDescription({
